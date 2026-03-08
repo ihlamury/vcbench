@@ -379,9 +379,10 @@ vcbench-task4/
 ├── plan.md                         ← this file
 ├── program.md                      ← Claude Code agent instructions (autoresearch style)
 ├── data/
-│   ├── public_train.csv            ← 80% stratified split
-│   ├── public_val.csv              ← 20% stratified holdout — NEVER touch during training
-│   └── private_test.csv            ← submission target
+│   ├── vcbench_final_public.csv    ← 4,500 labeled rows (source)
+│   ├── vcbench_final_private.csv   ← submission target
+│   ├── public_train.csv            ← 80% stratified split (generated)
+│   └── public_val.csv              ← 20% stratified holdout — NEVER touch during training
 ├── features/
 │   ├── extract_structured.py       ← parse educations_json, jobs_json → flat features
 │   ├── extract_llm.py              ← Anthropic API Tier 5 extraction (cached to JSON)
@@ -529,8 +530,8 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install pandas numpy scikit-learn xgboost lightgbm anthropic matplotlib seaborn joblib
 ```
 
-Confirm the public dataset CSV is in `data/public.csv` and the private test set is in
-`data/private_test.csv` before proceeding. Do not create placeholder files — stop and
+Confirm the public dataset CSV is in `data/vcbench_final_public.csv` and the private test set is in
+`data/vcbench_final_private.csv` before proceeding. Do not create placeholder files — stop and
 ask if either file is missing.
 
 ---
@@ -586,7 +587,7 @@ Run it to confirm the smoke test passes before moving to Step 2.
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-df = pd.read_csv("data/public.csv")
+df = pd.read_csv("data/vcbench_final_public.csv")
 
 print("=== Dataset overview ===")
 print(f"Total rows: {len(df)}")
@@ -985,7 +986,7 @@ from evaluate import evaluate
 FINAL_THRESHOLD = None  # Set this after Phase 5 calibration
 
 def generate_submission(threshold: float):
-    test = extract_features(pd.read_csv("data/private_test.csv"))
+    test = extract_features(pd.read_csv("data/vcbench_final_private.csv"))
     model = joblib.load("model.pkl")
 
     feature_cols = [c for c in test.columns if c in model.feature_names_in_]
