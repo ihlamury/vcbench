@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Model artifacts
+model.pkl
+*.joblib
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LLM cache (large, re-generable)
+features/llm_features_cache.json
+baselines/zero_shot_predictions.json
+
+# Original CSVs (keep data/ copies only)
+vcbench_final_public.csv
+vcbench_final_private*.csv
