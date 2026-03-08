@@ -34,3 +34,14 @@ All experiments are logged here in append-only format. Never delete entries.
 **Test results:** 90/90 passed (2.77s)
 **Output:** `features/FEATURE_SUMMARY.md` — full distribution and success-rate-by-value for all 23 features
 **Verdict:** PASS — all features validated. See `features/FEATURE_SUMMARY.md` for detailed distributions.
+
+## Step 5 — 2026-03-08
+**Change:** Zero-shot Claude Sonnet 4.5 baseline on 900 val rows (`anonymised_prose` only)
+**Model:** claude-sonnet-4-5-20250929
+**F0.5:** 0.1265 (prev best: none — this is the first baseline)
+**Precision:** 0.105
+**Recall:** 0.7037
+**Threshold:** 0.327
+**Positive rate:** 60.3% (543/900 predicted positive)
+**Notes:** Model outputs are poorly calibrated — 60% of predictions cluster at exactly 0.50, almost nothing above 0.60. The model predicts way too many positives, yielding very low precision. This is significantly worse than the GPT-4o zero-shot baseline on the leaderboard (25.7% F0.5). Possible causes: (1) Sonnet 4.5 is overly generous in success probability estimates, (2) the system prompt calibration is insufficient, (3) the anonymised prose doesn't contain enough discriminative signal for zero-shot approaches. This baseline strongly motivates the structured feature engineering approach.
+**Verdict:** LOGGED — baseline established at F0.5=0.1265. All subsequent models must beat this.
