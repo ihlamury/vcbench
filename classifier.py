@@ -8,6 +8,9 @@ Key finding: Heavy regularization (mcw=14, gamma=4.19, reg_lambda=15) forces
 the model into simple additive decision stumps, which generalize best on this
 small, imbalanced dataset (405 positives in 4500 rows).
 
+Phase 3 result (full coverage): 9 LLM features tested, CV delta -0.05pp.
+LLM features are redundant with structured features. Reverted to structured-only.
+
 evaluate.py is FIXED. Do not modify.
 """
 import pandas as pd

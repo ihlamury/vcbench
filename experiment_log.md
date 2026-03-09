@@ -227,3 +227,93 @@ The FP rate is the core issue (148 FPs vs 36 TPs). Many FPs look indistinguishab
 1. Phase 3 (LLM feature extraction) is the most promising path forward — the prose may contain signal not captured in structured fields (e.g., domain expertise depth, career narrative type).
 2. Industry-specific threshold tuning at lower thresholds.
 3. Phase 5 ensemble with SageMaker HPO on the full hyperparameter space.
+
+---
+
+## Phase 3 — LLM Feature Extraction (2026-03-08)
+
+### Step 9: LLM feature extraction from anonymised_prose
+
+**Extraction model:** claude-haiku-4-5-20251001
+**Extraction fields:** prior_founding_attempt, domain_expertise_depth, highest_seniority_reached, evidence_of_prior_exit, career_narrative_type, domain_focus_consistency, conviction_indicator
+**Mapped to 9 classifier features:** llm_prior_founding, llm_domain_expertise, llm_prior_exit, llm_narrative_builder, llm_narrative_climber, llm_seniority_founder, llm_seniority_clevel, llm_domain_focus, llm_conviction
+
+**Coverage:** 3,034/4,500 (67.4%) — API credit balance exhausted midway. 1,466 rows use default values (3 for numeric scales, 0 for binary).
+- Train coverage: 2,464/3,600 (68.4%)
+- Val coverage: 570/900 (63.3%)
+
+**Signal analysis (train set, covered rows only):**
+- llm_prior_exit: 8.5% True (success) vs 2.4% (failure) — 3.5x ratio (strongest)
+- llm_domain_focus: 3.12 (success) vs 2.61 (failure) — +0.51 gap
+- llm_domain_expertise: 3.32 vs 2.85 — +0.47 gap
+- llm_conviction: 2.97 vs 2.88 — weak (+0.09)
+- llm_prior_founding: 36.8% vs 37.4% — no signal
+
+### Experiment: Add 9 LLM features to locked XGB stump config
+
+**Change:** Added 9 LLM features to FEATURE_COLS (28 → 37 features). Locked model config from Experiment 120.
+**Hypothesis:** LLM-extracted features from prose capture signal invisible to structured JSON (domain focus, conviction, prior founding).
+**CV F₀.₅:** 0.2612 ± 0.0275 (prev best: 0.2539 ± 0.0348)
+**Val F₀.₅:** 0.2889 (prev best: 0.3030)
+**Precision:** 0.3611 (val)
+**Recall:** 0.1605 (val)
+**Threshold:** 0.897
+**CV delta:** +0.0073 (+0.73pp)
+**Val delta:** -0.0141 (-1.41pp)
+
+**Feature importance ranking for LLM features:**
+- #3: llm_domain_focus (0.0783) — strongest LLM feature
+- #4: llm_domain_expertise (0.0628)
+- #5: llm_prior_exit (0.0564)
+- #17: llm_conviction (0.0255)
+- #21: llm_seniority_clevel (0.0193)
+- #23: llm_seniority_founder (0.0148)
+- #27-29: llm_narrative_builder, llm_narrative_climber, llm_prior_founding (0.000 — unused by model)
+- LLM features capture 25.7% of total feature importance
+
+**Decision gate:** CV delta 0.0073 < 0.01 threshold → **NO IMPROVEMENT**
+
+**Verdict:** REVERT (per decision gate)
+
+**Notes:**
+- 33% of rows have default LLM values due to API credit exhaustion — this adds noise and dilutes signal. The true delta with full coverage may be higher.
+- CV std improved from 0.0348 to 0.0275 (more stable), suggesting LLM features add some regularization signal.
+- Val F₀.₅ dropped 1.4pp despite CV improvement — possible that default values for the 37% uncovered val rows hurt the val model more than the 32% uncovered train rows hurt CV.
+- Three LLM features (llm_domain_focus, llm_domain_expertise, llm_prior_exit) ranked in top 5 feature importances — the model WANTS to use them but coverage is insufficient.
+- If API credits are topped up and full extraction completes, re-run this experiment. The 0.73pp CV delta with 33% missing data is suggestive of a true delta potentially crossing the 1pp gate.
+
+### Re-run: Full coverage (4,500/4,500, 0 nulls)
+
+**Change:** Re-ran Phase 3 experiment after completing extraction to 100% coverage. Same 9 LLM features, same locked XGB stump config.
+**Coverage:** 4,500/4,500 (100%) — train 3,600/3,600, val 900/900.
+**CV F₀.₅:** 0.2534 ± 0.0305 (baseline: 0.2539 ± 0.0348)
+**Val F₀.₅:** 0.3065 (baseline: 0.3030)
+**Precision:** 0.3556 (val)
+**Recall:** 0.1975 (val)
+**Threshold:** 0.778
+**CV delta:** -0.0005 (-0.05pp)
+**Val delta:** +0.0035 (+0.35pp)
+
+**Feature importance ranking for LLM features (full coverage):**
+- #5: llm_domain_expertise (0.0568)
+- #6: llm_domain_focus (0.0539)
+- #7: llm_prior_exit (0.0524)
+- #14: llm_seniority_clevel (0.0314)
+- #18: llm_narrative_climber (0.0222)
+- #21: llm_narrative_builder (0.0194)
+- #24: llm_conviction (0.0151)
+- #26: llm_seniority_founder (0.0123)
+- #27: llm_prior_founding (0.000 — unused)
+- LLM features capture 26.4% of total feature importance
+
+**Decision gate:** CV delta -0.05pp < 1pp threshold → **NO IMPROVEMENT (DEFINITIVE)**
+
+**Verdict:** REVERT
+
+**Notes:**
+- Full coverage CONFIRMS the partial-coverage result: LLM features do not improve CV F₀.₅.
+- The earlier +0.73pp with 33% missing data was noise from default values, not signal.
+- The model allocates 26.4% of importance budget to LLM features, but this comes at the expense of structured features — it's redistributing, not adding signal.
+- Val F₀.₅ improved slightly (+0.35pp) but CV is flat, indicating this is variance, not signal.
+- Key finding for paper: LLM-extracted features from prose are REDUNDANT with structured JSON features. The prose is generated from the same underlying data — LLM extraction recovers the same signal, not new signal.
+- Phase 3 is complete. The structured ceiling (CV ≈ 0.25) is an information ceiling for this dataset, not a feature-engineering ceiling.

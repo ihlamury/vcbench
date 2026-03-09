@@ -43,8 +43,28 @@ Reasoned-Rule-Mining (87.5% precision, 5% recall) almost certainly fires only on
 | Step 5 — Zero-shot baseline | F₀.₅ = 0.1265 |
 | Step 6 — XGBoost + rule layer (23 structured features) | F₀.₅ = 0.2203, P=0.1957, R=0.4444, threshold=0.512 |
 | Step 7 — Manual inspection (TP=36, FN=45, FP=148, TN=671) | Core problem identified: FP rate |
+| Step 3c — Added 5 v2 features (repeat_founding_gap dropped, 73.8% null) | 28 usable features total |
+| Step 4b — Rule layer v2: only prior_exit active (Rule 3 precision=11.1%, disabled) | Rule layer simplified |
+| Step 6b — Platt calibration: invalid on same-set, deferred to CV | Rule-only model: F₀.₅=0.2889 (+6.9pp from disabling Rules 2+3) |
+| Step 6c — Industry-stratified analysis at threshold=0.923 | FPs spread across tech/software, not concentrated in biotech/VC at high threshold |
+| Phase 4 — 120+ experiments: HPO, ablations, model comparisons | **Best CV F₀.₅: 0.2539 ± 0.0348. Best Val F₀.₅: 0.3030** |
 
-### Key finding from Step 7
+### Structured feature ceiling — confirmed
+
+**Phase 4 is complete. The structured JSON fields have a hard ceiling at CV ≈ 0.25.**
+
+Root cause: 84% of positives (68 of 81 on val) have no prior exits. The rule layer catches the easy 16%. Non-exit positives are statistically near-identical to failures on every structured feature. Every model architecture tested — XGBoost, LightGBM, RandomForest, LogisticRegression, ensembles, two-stage models, stacking — converges on the same CV ceiling. The optimal architecture is decision stumps (max_depth=1) with heavy regularization, which signals the structured features have limited joint discriminative power.
+
+**Best configuration locked (do not iterate further on structured features):**
+- Model: XGBoost stumps, n_estimators=227, max_depth=1, lr=0.0674, subsample=0.949, colsample_bytree=0.413, scale_pos_weight=10, min_child_weight=14, gamma=4.19, reg_alpha=0.73, reg_lambda=15.0
+- Rule layer: prior_exit only (precision=24.5% on training set, 2.7× base rate)
+- Threshold: 0.738
+- Val result: F₀.₅=0.3030, P=0.3333, R=0.2222, 54 predicted positive
+
+**What this means for Phase 3:**
+Phase 3 (LLM feature extraction) is now the primary path to closing the gap, not a secondary test. The prose field likely contains signal not encoded in the structured JSON — domain expertise depth, career narrative type, conviction language — that the JSON fields cannot represent. The 0.25 CV ceiling is a structured-data ceiling, not an information ceiling.
+
+### Key finding from Step 7 (still valid)
 
 FPs have *higher* education prestige than TPs (edu_prestige_tier: 3.10 FP vs 2.78 TP). The model is over-indexing on credentials. What actually separates TPs from FPs:
 
@@ -56,12 +76,10 @@ FPs have *higher* education prestige than TPs (edu_prestige_tier: 3.10 FP vs 2.7
 | edu_prestige_tier | 2.78 | 1.31 | **3.10** ← noise |
 | prestige_sacrifice_score | 21.31 | 18.09 | **25.22** ← noise |
 
-**Root cause:** The model has a flat F₀.₅ curve from 0.50–0.95. This means probability estimates are not well-separated — the model is not confident. Fix calibration before adding more features.
-
 **Rule layer update:**
-- Rule 1 (prior_exit): KEEP — validated.
-- Rule 2 (top10_stem_founder): DISABLED — too many FPs in biotech/VC/PE. Re-enable only with founding_role_count ≥ 2.
-- Rule 3 (clevel_large_company): Tightened — now requires founding_role_count ≥ 2.
+- Rule 1 (prior_exit): KEEP — validated, precision=24.5% on training set (2.7× base rate).
+- Rule 2 (top10_stem_founder): DISABLED — FP amplifier.
+- Rule 3 (clevel_serial_founder): DISABLED — precision=11.1%, barely above 9% base rate.
 
 ---
 
@@ -321,8 +339,42 @@ for industry in val['industry'].unique():
 **2f. Run RRF ablation experiment.**
 Take Appendix E top-10 questions from the RRF paper. Implement each as a deterministic rule from structured fields. Compare precision of deterministic implementation vs. LLM-answered prose version. This becomes Section 4 of the paper.
 
-### Phase 3: LLM Feature Extraction — ONE-TIME
-Run extraction on all 4,500 rows. Cache. Add to feature set. Measure delta F₀.₅ vs. Phase 2 best. If delta < 1pp, note in log and deprioritize from paper narrative.
+### Phase 3: LLM Feature Extraction — NOW PRIMARY PATH ⚠️
+
+**Status change:** Phase 3 is no longer a secondary delta-test. It is the primary remaining lever. Structured features are exhausted at CV=0.2539. The gap to target (CV > 0.28) must come from prose-derived signal.
+
+**Why prose may help for non-exit positives:** The 84% of positives with no prior exits are invisible to structured features — their career JSON looks nearly identical to failures. But their prose may reveal: conviction language, domain expertise depth, the *way* they describe career transitions, and narrative patterns that VCs recognize intuitively but that don't reduce to structured fields. This is signal the JSON encoding cannot represent by construction.
+
+**What to extract (from `anonymised_prose` — do NOT ask "will this founder succeed?"):**
+
+```python
+EXTRACTION_PROMPT = """Given this founder profile, respond ONLY with valid JSON. No preamble.
+
+{
+  "prior_founding_attempt": true or false,
+  "domain_expertise_depth": 1-5,
+  "highest_seniority_reached": "founder"|"C-level"|"VP"|"senior-IC"|"IC"|"junior",
+  "evidence_of_prior_exit": true or false,
+  "career_narrative_type": "builder"|"climber"|"academic"|"hybrid"|"unclear",
+  "domain_focus_consistency": 1-5,
+  "conviction_indicator": 1-5
+}"""
+```
+
+Two fields added vs. original spec:
+- `domain_focus_consistency` — does the career show deep focus in one domain or broad jumping? 1=scattered, 5=laser-focused. This may be the key signal for non-exit positives.
+- `conviction_indicator` — does the prose suggest high personal commitment (left stable career, self-funded, early founding)? 1=low, 5=high. Operationalizes the sacrifice signal via language rather than career structure.
+
+**Execution:**
+- Run on all 4,500 public rows. Cache to `features/llm_features_cache.json`.
+- One-time cost: ~$5–10 at Sonnet pricing. Never re-run unless cache is deleted.
+- Add as features to `classifier.py`. Retrain with locked XGBoost stump config.
+- Run 5-fold CV. Record delta vs. CV=0.2539 baseline.
+- **Decision gate:** If CV delta ≥ 0.01 (1pp) → include in final model. If delta < 0.01 → prose features do not help; accept structured ceiling and submit best structured model.
+
+**If Phase 3 delta ≥ 1pp:** Run a second Phase 4 overnight loop (50–100 experiments) on the expanded feature set. Threshold re-sweep required since adding LLM features changes probability distribution.
+
+**If Phase 3 delta < 1pp:** Do not continue iterating. The information-theoretic ceiling for this dataset may be near 0.30 Val F₀.₅. Submit the locked XGBoost stump model. Write the paper around the structured ceiling finding — it is itself a publishable result about the limits of career-data signals for founder success prediction.
 
 ### Phase 4: Overnight Loop — CLAUDE CODE
 **Structure:** Read experiment_log.md → generate hypothesis → modify classifier.py → run evaluate.py (CV) → log → revert if no improvement → repeat.
@@ -717,8 +769,13 @@ EXTRACTION_PROMPT = """Given this founder profile, respond ONLY with valid JSON.
   "domain_expertise_depth": 1-5,
   "highest_seniority_reached": "founder"|"C-level"|"VP"|"senior-IC"|"IC"|"junior",
   "evidence_of_prior_exit": true or false,
-  "career_narrative_type": "builder"|"climber"|"academic"|"hybrid"|"unclear"
-}"""
+  "career_narrative_type": "builder"|"climber"|"academic"|"hybrid"|"unclear",
+  "domain_focus_consistency": 1-5,
+  "conviction_indicator": 1-5
+}
+
+domain_focus_consistency: 1=scattered across many domains, 5=laser-focused in one domain throughout career.
+conviction_indicator: 1=low personal commitment signals, 5=high commitment (left stable career, early founding, self-funded signals)."""
 
 def extract_llm_features(df):
     cache_path = Path(CACHE_FILE)
@@ -753,6 +810,8 @@ def extract_llm_features(df):
             "llm_narrative_climber": int(feat.get("career_narrative_type") == "climber"),
             "llm_seniority_founder": int(feat.get("highest_seniority_reached") == "founder"),
             "llm_seniority_clevel": int(feat.get("highest_seniority_reached") == "C-level"),
+            "llm_domain_focus": feat.get("domain_focus_consistency", 3),
+            "llm_conviction": feat.get("conviction_indicator", 3),
         })
     return df.merge(pd.DataFrame(records), on="founder_uuid", how="left")
 ```
@@ -839,23 +898,36 @@ Never delete entries. CV F₀.₅ is the decision metric. Val F₀.₅ is the sa
 *"What VCs Miss: Behavioral and Structural Signals in Founder Career Data"*
 *(Working alt: "Beyond Prose: Structured Feature Engineering for Founder Success Prediction")*
 
-### Core argument
-`anonymised_prose` is a generated, lossy re-encoding of the structured JSON fields. All prior approaches (to our knowledge) treat this as a text classification problem. We parse the source JSON directly, recovering signal degraded by the prose rendering: ordinal relationships, field interactions, null signals, and sequence information. We propose a feature engineering framework centered on three novel signals — sacrifice/opportunity cost, education×prestige interaction, and serial founding persistence — and show via ablation that structured parsing recovers measurable F₀.₅ relative to prose-based LLM inference.
+### Core argument (updated after Phase 4)
 
-### Ablation table (fill as phases complete)
+The paper now has two distinct contributions rather than one:
+
+**Contribution 1 (confirmed):** Structured JSON parsing recovers signal lost in the prose rendering — ordinal relationships, interaction terms, null signals — and outperforms zero-shot LLM inference on prose by +17pp Val F₀.₅ (0.1265 → 0.3030). The structured ceiling is real and measurable.
+
+**Contribution 2 (pending Phase 3):** The structured ceiling (CV ≈ 0.25) reveals that 84% of successful founders — those without prior exits — are invisible to career-structure data. Their success signal lives in the prose: conviction language, domain focus consistency, narrative type. We show that LLM-extracted behavioral features from prose recover this signal as a second-stage complement to structured parsing. The two approaches are not alternatives but complements — each covering a distinct population of successful founders.
+
+**If Phase 3 delta < 1pp:** Contribution 2 becomes a null result, which is itself publishable. The paper argues that founder success prediction for non-exit founders is near-random on available VCBench data — structured or unstructured — and that the benchmark's information ceiling for this population needs to be addressed in future dataset design.
+
+### Ablation table (updated with Phase 4 results)
 
 | Variant | CV F₀.₅ | Val F₀.₅ | Δ baseline |
 |---|---|---|---|
-| Zero-shot LLM on prose | — | 0.1265 | — |
-| Tier 1 rules only (exit signals) | TBD | TBD | TBD |
-| + Tier 2 (sacrifice signal) | TBD | TBD | TBD |
-| + Tier 3 (edu×QS interaction) | TBD | TBD | TBD |
-| Tier 1–4 full structured | TBD | 0.2203 | +9.4pp |
-| + Platt calibration | TBD | TBD | TBD |
-| + New v2 interaction features | TBD | TBD | TBD |
+| Zero-shot LLM on prose (baseline) | — | 0.1265 | — |
+| Tier 1 rules only (prior_exit) | — | 0.2889 | +16.2pp |
+| Tier 1–4 full structured (v1, 23 features) | — | 0.2203 | +9.4pp |
+| Tier 1–4 + v2 features + HPO (XGB stumps) | 0.2539 ± 0.035 | **0.3030** | +17.7pp |
 | + LLM extractor (Tier 5) | TBD | TBD | TBD |
-| + Ensemble / HPO | TBD | TBD | TBD |
+| + Phase 3 loop (if delta ≥ 1pp) | TBD | TBD | TBD |
 | RRF top-10 as deterministic rules | TBD | TBD | vs. RRF LLM-answered |
+
+**Key architectural finding for paper:** All model families (XGB, LGB, RF, LR, ensembles) converge on decision stumps (max_depth=1) as optimal. This is a dataset-size constraint — 405 positives cannot support complex joint feature interactions. This finding constrains the paper's claims about which features matter and motivates the LLM extraction approach as the path to recovering non-structural signal.
+
+### Framing rule (updated)
+Results now dictate a two-population framing:
+- **Exit-history founders (~16% of positives):** Fully captured by structured features. Near-deterministic rule layer.
+- **Non-exit founders (~84% of positives):** Invisible to structured data. Phase 3 is the test of whether LLM prose extraction can recover signal here.
+
+The paper's contribution depends on Phase 3 results. Do not finalize the narrative until Phase 3 delta is known.
 
 ### Target venues
 1. **IEEE SecureFinAI 2026** — guaranteed with contest entry; prize + proceedings in one artifact
@@ -866,9 +938,10 @@ Never delete entries. CV F₀.₅ is the decision metric. Val F₀.₅ is the sa
 
 | Milestone | Target |
 |---|---|
-| Phase 2–3 complete | April–May 2026 |
-| Phase 4 overnight loop | May 2026 |
-| Contest submission + arXiv | End of contest window |
+| Phase 3 (LLM extraction) | April 2026 |
+| Phase 4 loop on expanded features (if Phase 3 delta ≥ 1pp) | April–May 2026 |
+| Phase 5 HPO + submission | End of contest window |
+| arXiv preprint posted | Same week as submission |
 | IEEE proceedings | ~2 months post-contest |
 | ACM ICAIF submission | August 2026 |
 | ACM ICAIF notification | Oct–Nov 2026 |
@@ -888,13 +961,14 @@ Vela Partners co-sponsors the contest. Keep the paper independent. If formal Vel
 |---|---|
 | Dataset (public) | 4,500 rows |
 | Positive rate | 9% (405 success) |
-| Zero-shot baseline F₀.₅ | 0.1265 |
-| Current best F₀.₅ | 0.2203 (Step 6, pre-calibration) |
-| Phase 2 target | > 0.28 |
-| Phase 4 target | > 0.33 |
+| Zero-shot baseline Val F₀.₅ | 0.1265 |
+| Structured ceiling CV F₀.₅ | 0.2539 ± 0.035 |
+| Best Val F₀.₅ (locked model) | **0.3030** (P=0.3333, R=0.2222, threshold=0.738) |
+| Phase 3 decision gate | CV delta ≥ 0.01 → include LLM features |
+| Contest target | > 0.33 Val F₀.₅ |
 | Stretch goal | > 0.366 (beat Verifiable-RL) |
-| Optimal positive prediction rate | ~10–15% of test set |
-| Estimated optimal threshold | 0.75–0.85 (after calibration) |
+| Locked model config | XGB stumps, max_depth=1, spw=10, mcw=14 |
+| Rule layer | prior_exit only (precision=24.5%, fires on ~106 train rows) |
 
 ---
 
