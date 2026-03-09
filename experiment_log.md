@@ -103,3 +103,127 @@ The FP rate is the core issue (148 FPs vs 36 TPs). Many FPs look indistinguishab
 3. Add serial founder signal — founding_role_count interacted with tenure
 4. Reduce scale_pos_weight to lower recall and boost precision
 5. Add feature: ratio of founding tenure to total experience (commitment signal)
+
+## Step 3c — 2026-03-08
+**Change:** Added 6 v2 features to `features/extract_structured.py` (now 29 features total)
+**New features:**
+- `is_serial_founder`: binary (founding_role_count >= 2). 26.2% serial founders. Success rate: 9.9% vs 8.7% for non-serial.
+- `exit_x_serial`: exit_count * founding_role_count. Sparse — most are 0.
+- `sacrifice_x_serial`: prestige_sacrifice_score * is_serial_founder. Conditions sacrifice on serial history.
+- `industry_prestige_penalty`: edu_prestige_tier * is_biotech_or_vc. Discounts credential-dense industries.
+- `persistence_score`: longest_founding_tenure / (total_inferred_experience + 0.01). Range 0–1, median 0.064.
+- `repeat_founding_gap`: **DROPPED** — 73.8% null rate (above 35% threshold). Only computable for serial founders.
+**Null rates:** 0.0% for all 5 kept features.
+**Tests:** 90/90 still passing.
+**Verdict:** 5 v2 features added (repeat_founding_gap dropped). Total usable features: 28.
+
+## Step 4b — 2026-03-08
+**Change:** Updated `features/high_precision_rules.py` to v2 — disabled Rules 2 and 3
+**Rule validation on training set (v2):**
+- Rule 1 (prior_exit): fired=106, precision=24.5% — KEPT (2.7x base rate, strongest signal)
+- Rule 2 (top10_stem_founder): DISABLED — FP amplifier in biotech/VC/PE
+- Rule 3 (clevel_serial_founder): fired=431, precision=11.1% — DISABLED (barely above 9% base rate)
+**Verdict:** Only prior_exit rule active. Rules 2+3 disabled.
+
+## Step 6b — 2026-03-08
+**Change:** Applied Platt scaling to existing model.pkl (Karpathy priority #1)
+**Raw model (only prior_exit rule):** F0.5=0.2889, P=0.3611, R=0.1605, threshold=0.923
+**Calibrated (Platt on same val set):** F0.5=0.0 — collapsed distribution, invalid (fitting and evaluating on same data)
+**Key finding:** Disabling Rules 2+3 improved F0.5 from 0.2203 to 0.2889 (+6.9pp). The rule layer was injecting more noise than signal. High threshold (0.923) means the model is being very selective — only 36 predicted positive (4% positive rate).
+**Platt scaling note:** Same-set calibration is invalid. Proper calibration requires cross-validation (5-fold CV in Phase 4).
+**Verdict:** Rule layer fix confirmed. Platt scaling deferred to 5-fold CV approach.
+
+## Step 6c — 2026-03-08
+**Change:** Industry-stratified precision analysis on val set (a16z recommendation)
+**Threshold used:** 0.923 (optimal from Step 6b)
+**Overall:** F0.5=0.2889, P=0.3611, R=0.1605, 36 predicted positive (4% rate)
+
+**Top FP-generating industries (at threshold=0.923):**
+
+| Industry | N | FP | TP | Precision | Base rate |
+|---|---|---|---|---|---|
+| Technology/Internet Platforms | 100 | 5 | 2 | 28.6% | 11.0% |
+| (NaN / missing industry) | 43 | 4 | 2 | 33.3% | 7.0% |
+| Software Development | 127 | 3 | 1 | 25.0% | 11.8% |
+| Internet Media & Publishing | 5 | 2 | 0 | 0.0% | 20.0% |
+| VC & Private Equity | 14 | 1 | 2 | 66.7% | 14.3% |
+| Biotech & Nanotech Research | 42 | 1 | 1 | 50.0% | 19.0% |
+
+**Key findings:**
+- At high threshold (0.923), FPs are distributed across industries, not concentrated in biotech/VC as expected.
+- Biotech/VC actually have decent precision (50-67%) at this threshold — the FP cluster was at lower thresholds.
+- Technology/Internet (5 FP) and Software Dev (3 FP) generate the most FPs — these are the largest industry groups.
+- Only 36 predictions total at this threshold, making per-industry analysis sparse.
+- 23 of the 36 predictions come from the prior_exit rule layer override.
+**Verdict:** Industry-stratified thresholds may help at lower thresholds but are less relevant at 0.923. Log for Phase 4 experimentation.
+
+---
+
+# Phase 4 Overnight Loop — Experiments
+
+## Experiment 8 — 2026-03-08
+**Change:** Phase 4 baseline — v2 features + 5-fold CV + only prior_exit rule
+**Hypothesis:** Adding v2 interaction features (is_serial_founder, exit_x_serial, sacrifice_x_serial, industry_prestige_penalty, persistence_score) should improve discrimination
+**CV F₀.₅:** 0.2025 ± 0.0318 (prev best: N/A — first CV measurement)
+**Val F₀.₅:** 0.2941 (prev best: 0.2889)
+**Precision:** 0.3269
+**Recall:** 0.2099
+**Threshold:** 0.751
+**Top 3 features:** edu_prestige_tier (0.065), best_degree_prestige (0.058), exit_x_serial (0.047)
+**Verdict:** KEEP — Phase 4 baseline established. CV is ~9pp below val, indicating high variance.
+**Notes:** exit_x_serial entered top-3 importance. edu_prestige_tier still dominates despite being noise. Need to test removing it.
+
+## Experiments 9–100 — 2026-03-08 (Phase 4 batch)
+**Change:** Systematic hyperparameter sweep, feature ablations, model comparisons
+**Total experiments:** 100+
+**Hypotheses tested:**
+- Remove edu_prestige features (Exp9): CV=0.1839 — WORSE, features help despite noise
+- Remove prestige_sacrifice_score (Exp10): CV=0.1992 — WORSE
+- scale_pos_weight sweep (Exp11-12,16,70): spw=5 is marginally best but within noise
+- max_depth sweep (Exp13-14,24-25,67,94): depth=4 remains best
+- min_child_weight (Exp18,23,29,48): **mcw=5 is a major win, CV=0.2330** (+3pp from baseline)
+- Rule layer in CV (Exp33): **CV jumps from 0.2330 to 0.2506** (+1.8pp)
+- Two-stage model (Exp71-76): WORSE than single model
+- LightGBM (Exp36,109-111): **LGB num_leaves=15 reaches CV=0.2525**
+- RandomForest (Exp63,65): CV=0.2361-0.2406
+- LogisticRegression (Exp35): CV=0.2277 (competitive!)
+- Ensemble XGB+LGB (Exp59,103): CV=0.2463 (no improvement)
+- Custom sample weights (Exp101-102): WORSE
+- Derived features in classifier (Exp83-85): No improvement
+- Permutation importance: sacrifice_x_serial, field_relevance_score, industry_pivot_count are harmful
+- Bayesian optimization via Optuna (200 trials each): See below.
+
+**Key finding:** All models converge on **max_depth=1 (decision stumps)** with heavy regularization as the optimal architecture. The dataset is too small (405 positives) for complex models.
+
+## Experiment 120 — 2026-03-08 (Optuna best)
+**Change:** Optuna Bayesian optimization — 200 trials XGB + 200 trials LGB
+**Hypothesis:** Systematic hyperparameter search may find a better configuration than manual tuning
+**XGB best params:** n_estimators=227, max_depth=1, lr=0.0674, subsample=0.949, colsample_bytree=0.413, scale_pos_weight=10, mcw=14, gamma=4.19, reg_alpha=0.73, reg_lambda=15.0
+**LGB best params:** n_estimators=612, max_depth=1, lr=0.013, num_leaves=45, subsample=0.849, colsample=0.762, spw=10, mcw=10, reg_alpha=1.11, reg_lambda=9.55
+**CV F₀.₅ (XGB):** 0.2549 ± 0.0291 (prev best: 0.2506)
+**CV F₀.₅ (LGB):** 0.2589 ± 0.0308
+**Val F₀.₅ (XGB):** 0.3030, P=0.3333, R=0.2222, threshold=0.738, n_pos=54
+**Val F₀.₅ (LGB):** 0.2889, P=0.3611, R=0.1605
+**Ensemble (XGB+LGB) CV:** 0.2560, Val=0.2949
+**Final config chosen:** XGB stumps (spw=10 variant) — best val F0.5 at 0.3030
+**Top 5 features:** edu_prestige_tier (0.121), best_degree_prestige (0.100), prestige_x_relevance (0.088), prestige_sacrifice_score (0.084), exit_x_serial (0.063)
+**Verdict:** KEEP — best configuration found. CV=0.2539, Val=0.3030.
+
+## Phase 4 Summary — 2026-03-08
+**Total experiments run:** 120+
+**Best CV F₀.₅:** 0.2539 ± 0.0348 (XGB stumps, spw=10, with rules)
+**Best Val F₀.₅:** 0.3030 (P=0.3333, R=0.2222, threshold=0.738)
+**Phase 2 target (0.28 CV):** NOT reached. Best CV is 0.2539. Gap: ~2.6pp.
+**Phase 4 target (0.33 CV):** NOT reached. Gap: ~7.6pp.
+
+**Root cause analysis:**
+- 84% of positives (68 of 81 on val) have NO prior exits. The rule layer catches the easy 16%.
+- Non-exit positives are statistically almost identical to failures on all structured features.
+- The strongest non-exit separator is industry_alignment (1.38x ratio) — too weak alone.
+- The structured JSON fields contain limited discriminative signal for non-exit success.
+- All models (XGB, LGB, RF, LR) and all architectures (deep trees, stumps, ensembles, stacking) converge on the same ~0.25 CV ceiling.
+
+**Recommendations for next phase:**
+1. Phase 3 (LLM feature extraction) is the most promising path forward — the prose may contain signal not captured in structured fields (e.g., domain expertise depth, career narrative type).
+2. Industry-specific threshold tuning at lower thresholds.
+3. Phase 5 ensemble with SageMaker HPO on the full hyperparameter space.

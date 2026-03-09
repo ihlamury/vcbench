@@ -52,6 +52,11 @@ BUSINESS_KEYWORDS = {
     "consulting", "leadership", "organizational",
 }
 
+BIOTECH_VC_KEYWORDS = {
+    "biotech", "biotechnology", "venture capital", "private equity",
+    "life sciences", "pharmaceutical", "research",
+}
+
 
 # === Helper functions ===
 
@@ -255,6 +260,14 @@ def _safe_str(val):
     return str(val)
 
 
+def _is_biotech_or_vc(industry_str):
+    """Check if startup industry is biotech/VC/PE — credential-dense, high FP rate."""
+    if not industry_str:
+        return 0
+    ind = industry_str.lower()
+    return int(any(kw in ind for kw in BIOTECH_VC_KEYWORDS))
+
+
 def _is_founding_size(size_ordinal):
     """Check if company size indicates a founding-stage company (myself only or 2-10)."""
     return size_ordinal in (1, 2)
@@ -384,17 +397,20 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
         sizes = []
         founding_count = 0
         founding_tenures = []
+        founding_indices = []
+        all_durations = []
         restless_count = 0
         job_industries = set()
         total_exp = 0.0
 
-        for job in jobs:
+        for job_i, job in enumerate(jobs):
             size_ord = _normalize_company_size(job.get("company_size", ""))
             seniority = _get_seniority(job.get("role", ""))
             dur = _get_duration_midpoint(job.get("duration", ""))
 
             seniorities.append(seniority)
             sizes.append(size_ord)
+            all_durations.append(dur)
             total_exp += dur
 
             if dur < 2:
@@ -403,6 +419,7 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
             if _is_founding_size(size_ord) or seniority == 5:
                 founding_count += 1
                 founding_tenures.append(dur)
+                founding_indices.append(job_i)
 
             job_ind = job.get("industry", "")
             if job_ind:
@@ -429,6 +446,14 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
             for ji in job_industries
         )) if startup_industry else 0
 
+        # repeat_founding_gap: years between 1st and 2nd founding role (chronologically)
+        # Jobs are newest-first, so chronologically 1st = largest index, 2nd = second-largest
+        repeat_gap = np.nan
+        if len(founding_indices) >= 2:
+            idx_first = founding_indices[-1]   # chronologically 1st (oldest in list)
+            idx_second = founding_indices[-2]  # chronologically 2nd
+            repeat_gap = sum(all_durations[idx_second + 1 : idx_first])
+
         traj_records.append({
             "max_seniority_reached": max(seniorities) if seniorities else 0,
             "seniority_is_monotone": seniority_mono,
@@ -439,10 +464,20 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
             "industry_pivot_count": len(job_industries),
             "industry_alignment": industry_aligned,
             "total_inferred_experience": total_exp,
+            "repeat_founding_gap": repeat_gap,
         })
 
     traj_df = pd.DataFrame(traj_records, index=df.index)
     df = pd.concat([df, traj_df], axis=1)
+
+    # --- v2 derived features (from Step 7 + panel synthesis) ---
+    df["is_serial_founder"] = (df["founding_role_count"] >= 2).astype(int)
+    df["exit_x_serial"] = df["exit_count"] * df["founding_role_count"]
+    df["sacrifice_x_serial"] = df["prestige_sacrifice_score"] * df["is_serial_founder"]
+    df["industry_prestige_penalty"] = df["edu_prestige_tier"] * df["industry"].apply(
+        lambda x: _is_biotech_or_vc(_safe_str(x))
+    )
+    df["persistence_score"] = df["longest_founding_tenure"] / (df["total_inferred_experience"] + 0.01)
 
     # Drop temporary columns
     df.drop(columns=["_edu_parsed", "_jobs_parsed", "_ipos_parsed", "_acq_parsed"], inplace=True)
@@ -463,6 +498,9 @@ if __name__ == "__main__":
         "max_seniority_reached", "seniority_is_monotone", "company_size_is_growing",
         "restlessness_score", "founding_role_count", "longest_founding_tenure",
         "industry_pivot_count", "industry_alignment", "total_inferred_experience",
+        # v2 features
+        "is_serial_founder", "exit_x_serial", "sacrifice_x_serial",
+        "industry_prestige_penalty", "persistence_score", "repeat_founding_gap",
     ]
 
     print(f"Total features created: {len(FEATURE_COLS)}")
@@ -471,11 +509,24 @@ if __name__ == "__main__":
         null_rate = result[col].isna().mean()
         print(f"  {col}: {null_rate:.1%}")
 
-    print(f"\n=== Key feature distributions ===")
-    for col in ["exit_count", "prestige_sacrifice_score", "edu_prestige_tier", "max_seniority_reached"]:
-        print(f"\n{col}:")
-        print(result[col].value_counts().sort_index())
+    # Check repeat_founding_gap null rate — drop if > 35%
+    rfg_null = result["repeat_founding_gap"].isna().mean()
+    print(f"\n*** repeat_founding_gap null rate: {rfg_null:.1%} ***")
+    if rfg_null > 0.35:
+        print("  -> ABOVE 35% THRESHOLD — should be DROPPED from feature set")
+    else:
+        print("  -> Below 35% threshold — KEEP")
 
-    # Success rate by exit_count
+    print(f"\n=== v2 feature distributions ===")
+    for col in ["is_serial_founder", "exit_x_serial", "sacrifice_x_serial",
+                "industry_prestige_penalty", "persistence_score", "repeat_founding_gap"]:
+        print(f"\n{col}:")
+        print(result[col].describe().round(3))
+        if col in ["is_serial_founder"]:
+            print(result[col].value_counts().sort_index())
+
+    print(f"\n=== Success rate by is_serial_founder ===")
+    print(result.groupby("is_serial_founder")["success"].mean().round(3))
+
     print(f"\n=== Success rate by exit_count ===")
     print(result.groupby("exit_count")["success"].mean().round(3))
