@@ -29,7 +29,7 @@ features/llm_features_cache.json
 baselines/zero_shot_predictions.json
 
 # Submission folder
-submission/
+submissions/
 
 # VCBench dataset files (commercial licence — not redistributable)
 data/vcbench_final_public.csv
