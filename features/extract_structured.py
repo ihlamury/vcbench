@@ -284,7 +284,46 @@ def _is_comfort_industry(industry_str):
 # === Main extraction function ===
 
 def extract_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Takes raw dataframe, returns dataframe with all feature columns appended."""
+    """Extract all 28 structured features from a VCBench dataframe.
+
+    Parses the ``educations_json``, ``jobs_json``, ``ipos``, and ``acquisitions``
+    columns and appends one column per feature to a copy of the input dataframe.
+    The original columns are preserved; four temporary ``_*_parsed`` columns are
+    dropped before returning.
+
+    Feature tiers
+    -------------
+    Tier 1 — Direct exit signals (3):
+        has_prior_ipo, has_prior_acquisition, exit_count
+    Tier 2 — Sacrifice signal (5):
+        max_company_size_before_founding, prestige_sacrifice_score,
+        years_in_large_company, comfort_index, founding_timing
+    Tier 3 — Education × QS interaction (6):
+        edu_prestige_tier, field_relevance_score, prestige_x_relevance,
+        degree_level, stem_flag, best_degree_prestige
+    Tier 4 — Career trajectory (9):
+        max_seniority_reached, seniority_is_monotone, company_size_is_growing,
+        restlessness_score, founding_role_count, longest_founding_tenure,
+        industry_pivot_count, industry_alignment, total_inferred_experience
+    v2 interaction features (5):
+        is_serial_founder, exit_x_serial, sacrifice_x_serial,
+        industry_prestige_penalty, persistence_score
+
+    Note: ``repeat_founding_gap`` is also computed but excluded from the
+    classifier feature set due to a 73.8% null rate on the training split.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Raw VCBench dataframe. Must contain ``educations_json``, ``jobs_json``,
+        ``ipos``, ``acquisitions``, and ``industry`` columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of ``df`` with 28 feature columns appended. Null rates are 0% for
+        all classifier features (NaN → 0 fill applied in classifier.py).
+    """
     df = df.copy()
 
     # Pre-parse JSON columns

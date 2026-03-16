@@ -22,8 +22,27 @@ FEATURE_COLS = [
 ]
 
 
+PRIVATE_DATA_PATH = "data/vcbench_final_private.csv"
+OUTPUT_PATH = "submissions/submission_v1.csv"
+
+
 def generate_submission():
-    test = extract_features(pd.read_csv("data/vcbench_final_private.csv"))
+    """Load the trained model and generate binary predictions on the test set.
+
+    Applies the full inference pipeline:
+    1. Extract structured features from the test CSV.
+    2. Score rows with the trained XGBoost model (loaded from model.pkl).
+    3. Override probabilities to 1.0 where the rule layer fires (exit_count > 0).
+    4. Apply FINAL_THRESHOLD (0.738) to produce binary predictions.
+    5. Validate that the positive rate is in the expected 4–15% range.
+    6. Save ``founder_uuid, success`` to ``submissions/submission_v1.csv``.
+
+    Returns
+    -------
+    str or None
+        Output file path if saved successfully; None if the sanity check fails.
+    """
+    test = extract_features(pd.read_csv(PRIVATE_DATA_PATH))
     model = joblib.load("model.pkl")
 
     X_test = test[FEATURE_COLS].fillna(0)
@@ -62,10 +81,9 @@ def generate_submission():
         "founder_uuid": test["founder_uuid"],
         "success": preds,
     })
-    filename = "submissions/submission_v1.csv"
-    submission.to_csv(filename, index=False)
-    print(f"\nSaved: {filename}")
-    return filename
+    submission.to_csv(OUTPUT_PATH, index=False)
+    print(f"\nSaved: {OUTPUT_PATH}")
+    return OUTPUT_PATH
 
 
 if __name__ == "__main__":

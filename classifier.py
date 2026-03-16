@@ -58,11 +58,31 @@ MODEL_PARAMS = dict(
 
 
 def make_model():
+    """Return a fresh XGBClassifier with the Optuna-tuned hyperparameters."""
     return xgb.XGBClassifier(**MODEL_PARAMS)
 
 
 def cv_evaluate_with_rules(df, features, n_splits=5):
-    """5-fold stratified CV with rule layer applied."""
+    """Run stratified k-fold CV with the rule layer applied inside each fold.
+
+    The rule layer (high_precision_rules.apply_rules) is applied to validation
+    rows *after* the model scores them, overriding probabilities to 1.0 where a
+    rule fires. This mirrors the exact inference path used in production.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Feature-extracted dataframe including a ``success`` column.
+    features : list[str]
+        Feature column names to pass to the model.
+    n_splits : int
+        Number of CV folds (default 5).
+
+    Returns
+    -------
+    dict
+        ``{"cv_mean_f05": float, "cv_std_f05": float}``
+    """
     X = df[features].fillna(0)
     y = df["success"]
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
@@ -83,6 +103,21 @@ def cv_evaluate_with_rules(df, features, n_splits=5):
 
 
 def train_and_evaluate():
+    """Train the final model on public_train.csv and evaluate on public_val.csv.
+
+    Workflow:
+    1. Run 5-fold CV on the training set (with rule layer) to get CV F₀.₅.
+    2. Train the final model on the full training set.
+    3. Apply the rule layer to validation probabilities.
+    4. Sweep thresholds to find the best F₀.₅ on the validation set.
+    5. Print feature importances and save the trained model to model.pkl.
+
+    Returns
+    -------
+    tuple[dict, dict]
+        ``(cv_result, val_result)`` where each dict contains f05, precision,
+        recall, and threshold keys.
+    """
     train = extract_features(pd.read_csv("data/public_train.csv"))
     val = extract_features(pd.read_csv("data/public_val.csv"))
 

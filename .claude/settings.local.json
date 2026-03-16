@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(/opt/homebrew/bin/tectonic paper_final.tex 2>&1 | grep -E \"^\\(error|warning.*Overfull|Writing|note: Writing\\)\")",
-      "Bash(/opt/homebrew/bin/tectonic paper_final.tex 2>&1 | grep -E \"^\\(error|note: Writing|warning.*[Oo]ver\\)\")"
-    ]
-  }
-}

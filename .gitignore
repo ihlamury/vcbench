@@ -5,15 +5,17 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.pytest_cache/
 
-# Model artifacts
+# Model artifacts (too large for git; train locally with classifier.py)
 model.pkl
 *.joblib
 
-# IDE
+# IDE / local tooling
 .vscode/
 .idea/
 *.swp
+.claude/
 
 # Secrets
 .env
@@ -22,10 +24,12 @@ model.pkl
 .DS_Store
 Thumbs.db
 
-# LLM cache (large, re-generable)
+# LLM cache (large, re-generable — see features/extract_llm.py)
 features/llm_features_cache.json
 baselines/zero_shot_predictions.json
 
-# Original CSVs (keep data/ copies only)
-vcbench_final_public.csv
-vcbench_final_private*.csv
+# VCBench dataset files (commercial licence — not redistributable)
+data/vcbench_final_public.csv
+data/vcbench_final_private*.csv
+data/public_train.csv
+data/public_val.csv
