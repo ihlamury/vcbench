@@ -8,8 +8,10 @@ Structured feature engineering and signal-limit analysis for predicting startup 
 
 ```
 Ihlamur, Y. (2026). When Career Data Runs Out: Structured Feature Engineering and Signal Limits for Founder Success Prediction.
-SecureFinAI Contest @ IEEE IDS 2026. [arXiv link TBD]
+SecureFinAI Contest @ IEEE IDS 2026. Accepted.
 ```
+
+Camera-ready PDF: [`paper/paper_camera_ready.pdf`](paper/paper_camera_ready.pdf)
 
 ---
 
@@ -48,10 +50,10 @@ vcbench/
 │   ├── public_train.csv        # Training split (3,600 rows) — not included, see Data note
 │   └── public_val.csv          # Validation split (900 rows) — not included, see Data note
 ├── paper/
-│   ├── paper_final.tex        # Submitted LaTeX source
-│   └── paper_final.pdf        # Compiled paper
-├── submissions/
-│   └── submission_v1.csv      # Final test submission (founder_uuid, success)
+│   ├── paper_final.tex             # Original submission LaTeX source
+│   ├── paper_final.pdf             # Original submission PDF
+│   ├── paper_camera_ready.tex      # Camera-ready LaTeX source (accepted)
+│   └── paper_camera_ready.pdf      # Camera-ready compiled PDF
 ├── experiments/
 │   ├── run_calibration.py     # Platt scaling experiment (not used in final model)
 │   └── platt_scaler.pkl       # Calibration artifact from above
@@ -252,13 +254,13 @@ The train/val split (`data/split.py`, stratified 80/20, `random_state=42`) is lo
 ## Roadmap & Next Steps
 
 **Paper**
-- [ ] Camera-ready update pending IEEE IDS 2026 acceptance notification (expected March 20, 2026)
-- [ ] Will update Section V with private test results (F₀.₅ = 0.2811, fold breakdown, confusion matrix) upon acceptance
-- [ ] arXiv preprint to be posted following IEEE notification
-- [ ] Amazon affiliation TBD — paper written independently of Amazon work
+- [x] Camera-ready submitted — see `paper/paper_camera_ready.pdf`
+- [x] Section V updated with private test results (F₀.₅ = 0.2811, fold breakdown, confusion matrix)
+- [x] Independent work footnote added (work conducted independently of Amazon)
+- [ ] arXiv preprint pending
 
 **Model & Features**
-- [ ] Open-source the full feature extraction pipeline (currently awaiting repo cleanup)
+- [x] Full feature extraction pipeline open-sourced (`features/extract_structured.py`)
 - [ ] Ablation study on Tier 4 features — several showed marginal CV gains that warrant deeper analysis with a larger dataset
 - [ ] `repeat_founding_gap` feature dropped due to 73.8% null rate — worth investigating with imputation or a richer dataset
 
