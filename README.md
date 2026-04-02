@@ -7,8 +7,7 @@ Structured feature engineering and signal-limit analysis for predicting startup 
 ## Citation
 
 ```
-Ihlamur, Y. (2026). When Career Data Runs Out: Structured Feature Engineering and Signal Limits for Founder Success Prediction.
-SecureFinAI Contest @ IEEE IDS 2026. Accepted.
+Ihlamur, Y. (2026). When Career Data Runs Out: Structured Feature Engineering and Signal Limits for Founder Success Prediction. SecureFinAI Contest @ IEEE IDS 2026. arXiv:2604.00339. https://arxiv.org/abs/2604.00339
 ```
 
 Camera-ready PDF: [`paper/paper_camera_ready.pdf`](paper/paper_camera_ready.pdf)
@@ -257,7 +256,7 @@ The train/val split (`data/split.py`, stratified 80/20, `random_state=42`) is lo
 - [x] Camera-ready submitted — see `paper/paper_camera_ready.pdf`
 - [x] Section V updated with private test results (F₀.₅ = 0.2811, fold breakdown, confusion matrix)
 - [x] Independent work footnote added (work conducted independently of Amazon)
-- [ ] arXiv preprint pending
+- [x] arXiv preprint posted: https://arxiv.org/abs/2604.00339
 
 **Model & Features**
 - [x] Full feature extraction pipeline open-sourced (`features/extract_structured.py`)
